@@ -146,14 +146,6 @@ async function deleteMessages(authToken, authorId, guildId, channelId, minId, ma
 
         if (messagesToDelete.length > 0) {
 
-            if (++iterations < 1) {
-                log.verb(`Waiting for your confirmation...`);
-                if (!await ask(`Do you want to delete ~${total} messages?\nEstimated time: ${etr}\n\n---- Preview ----\n` +
-                    messagesToDelete.map(m => `${m.author.username}#${m.author.discriminator}: ${m.attachments.length ? '[ATTACHMENTS]' : m.content}`).join('\n')))
-                    return end(log.error('Aborted by you!'));
-                log.verb(`OK`);
-            }
-
             for (let i = 0; i < messagesToDelete.length; i++) {
                 const message = messagesToDelete[i];
                 if (stopHndl && stopHndl() === false) return end(log.error('Stopped by you!'));
@@ -282,7 +274,7 @@ function initUI() {
                 <span>Guild/Channel <a
                         href="https://github.com/victornpb/deleteDiscordMessages/blob/master/help/channelId.md" title="Help"
                         target="_blank">?</a>
-                    <button id="getGuildAndChannel">get</button><br>
+                    <button id="getGuildAndChannel">get</button><button id="allDM">allDM</button><br>
                     <input id="guildId" type="text" placeholder="Guild ID" priv><br>
                     <input id="channelId" type="text" placeholder="Channel ID" priv><br>
                     <label><input id="includeNsfw" type="checkbox">NSFW Channel</label><br><br>
@@ -370,6 +362,7 @@ function initUI() {
     const startBtn = $('button#start');
     const stopBtn = $('button#stop');
     const autoScroll = $('#autoScroll');
+    const ask = async msg => new Promise(resolve => setTimeout(() => resolve(window.confirm(msg)), 10));
 
     startBtn.onclick = async e => {
         const authToken = $('input#authToken').value.trim();
@@ -421,8 +414,11 @@ function initUI() {
 
         stop = stopBtn.disabled = !(startBtn.disabled = true);
         for (let i = 0; i < channelIds.length; i++) {
+            if (i === 0) {
+                if (!await ask(`Do you want to delete DM messages? (${channelIds.length} channels)`)) return;
+            };
             await deleteMessages(authToken, authorId, guildId, channelIds[i], minId || minDate, maxId || maxDate, content, hasLink, hasFile, includeNsfw, includePinned, searchDelay, deleteDelay, logger, stopHndl, onProg);
-            stop = stopBtn.disabled = !(startBtn.disabled = false);
+            if (i === (channelIds.length - 1)) stop = stopBtn.disabled = !(startBtn.disabled = false);
         }
     };
     stopBtn.onclick = e => stop = stopBtn.disabled = !(startBtn.disabled = false);
@@ -439,6 +435,11 @@ function initUI() {
         const m = location.href.match(/channels\/([\w@]+)\/(\d+)/);
         $('input#guildId').value = m[1];
         $('input#channelId').value = m[2];
+    };
+    $('button#allDM').onclick = async (e) => {
+        const dmChannels = await (await fetch("https://discord.com/api/v6/users/@me/channels", { method: "GET", headers: { "Authorization": `${$('input#authToken').value.trim()}` } })).json();
+        $('input#guildId').value = "@me";
+        $('input#channelId').value = dmChannels.map((ch) => ch.id).join(",");
     };
     $('#redact').onchange = e => {
         popover.classList.toggle('redact') &&
