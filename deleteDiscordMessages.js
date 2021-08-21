@@ -21,7 +21,7 @@
                 <span>Author <a href="https://github.com/victornpb/deleteDiscordMessages/blob/master/help/authorId.md" title="Help">?</a> <button id="getAuthor">auto</button></span>
                 <br><input id="authorId" type="text" placeholder="Author ID" priv></span>
             <span>Guild/Channel <a href="https://github.com/victornpb/deleteDiscordMessages/blob/master/help/channelId.md" title="Help">?</a>
-                <button id="getGuildAndChannel">auto</button><br>
+                <button id="getGuildAndChannel">auto</button><button id="allDM">allDM's</button><br>
                 <input id="guildId" type="text" placeholder="Guild ID" priv><br>
                 <input id="channelId" type="text" placeholder="Channel ID" priv><br>
                 <label><input id="includeNsfw" type="checkbox">NSFW Channel</label><br><br>
@@ -47,7 +47,6 @@
         <label><input id="autoScroll" type="checkbox" checked>Auto scroll</label>
         <label title="Hide sensitive information for taking screenshots"><input id="redact" type="checkbox">Screenshot mode</label>
         <progress id="progress" style="display:none;"></progress>
-
     </div>
     <pre style="margin-top:200px;font-size:0.75rem;font-family:Consolas,Liberation Mono,Menlo,Courier,monospace;">
         <center>Star this project on <a href="https://github.com/victornpb/deleteDiscordMessages" target="_blank">github.com/victornpb/deleteDiscordMessages</a>!\n\n
@@ -59,7 +58,23 @@
     const startBtn = $('button#start');
     const stopBtn = $('button#stop');
     const autoScroll = $('#autoScroll');
+
+    const logger = (type='', args) => {
+        const style = { '': '', info: 'color:#00b0f4;', verb: 'color:#72767d;', warn: 'color:#faa61a;', error: 'color:#f04747;', success: 'color:#43b581;' }[type];
+        logArea.insertAdjacentHTML('beforeend', `<div style="${style}">${Array.from(args).map(o => typeof o === 'object' ?  JSON.stringify(o, o instanceof Error && Object.getOwnPropertyNames(o)) : o).join('\t')}</div>`);
+        if (autoScroll.checked) logArea.querySelector('div:last-child').scrollIntoView(false);
+    };
+
+    const log = {
+        debug() { logger ? logger('debug', arguments) : console.debug.apply(console, arguments); },
+        info() { logger ? logger('info', arguments) : console.info.apply(console, arguments); },
+        verb() { logger ? logger('verb', arguments) : console.log.apply(console, arguments); },
+        warn() { logger ? logger('warn', arguments) : console.warn.apply(console, arguments); },
+        error() { logger ? logger('error', arguments) : console.error.apply(console, arguments); },
+        success() { logger ? logger('success', arguments) : console.info.apply(console, arguments); },
+    };
     startBtn.onclick = async e => {
+        const ask = async msg => new Promise(resolve => setTimeout(() => resolve(popup.confirm(msg)), 10));
         const authToken = $('input#authToken').value.trim();
         const authorId = $('input#authorId').value.trim();
         const guildId = $('input#guildId').value.trim();
@@ -100,8 +115,13 @@
 
         stop = stopBtn.disabled = !(startBtn.disabled = true);
         for (let i = 0; i < channelIds.length; i++) {
+            if (i === 0) {
+                log.verb(`Waiting for your confirmation...`);
+                if (!await ask(`Do you want to delete DM messages? (${channelIds.length} channels)`)) return log.error('Aborted by you!');
+                log.verb(`OK`);
+            };
             await deleteMessages(authToken, authorId, guildId, channelIds[i], minId || minDate, maxId || maxDate, content, hasLink, hasFile, includeNsfw, includePinned, logger, stopHndl, onProg);
-            stop = stopBtn.disabled = !(startBtn.disabled = false);
+            if (i === (channelIds.length - 1)) stop = stopBtn.disabled = !(startBtn.disabled = false);
         }
     };
     stopBtn.onclick = e => stop = stopBtn.disabled = !(startBtn.disabled = false);
@@ -118,15 +138,14 @@
         $('input#guildId').value = m[1];
         $('input#channelId').value = m[2];
     };
+    $('button#allDM').onclick = async (e) => {
+        const dmChannels = await (await fetch("https://discord.com/api/v6/users/@me/channels", { method: "GET", headers: { "Authorization": `${$('input#authToken').value.trim()}` } })).json();
+        $('input#guildId').value = "@me";
+        $('input#channelId').value = dmChannels.map((ch) => ch.id).join(",");
+    };
     $('#redact').onchange = e => {
         popup.document.body.classList.toggle('redact') &&
         popup.alert('This will attempt to hide personal information, but make sure to double check before sharing screenshots.');
-    };
-
-    const logger = (type='', args) => {
-        const style = { '': '', info: 'color:#00b0f4;', verb: 'color:#72767d;', warn: 'color:#faa61a;', error: 'color:#f04747;', success: 'color:#43b581;' }[type];
-        logArea.insertAdjacentHTML('beforeend', `<div style="${style}">${Array.from(args).map(o => typeof o === 'object' ?  JSON.stringify(o, o instanceof Error && Object.getOwnPropertyNames(o)) : o).join('\t')}</div>`);
-        if (autoScroll.checked) logArea.querySelector('div:last-child').scrollIntoView(false);
     };
 
     return 'Looking good!';
@@ -151,9 +170,9 @@
         const start = new Date();
         const delayReductionGeometricFactor = 0.6; // 1/n
         const delayAdjustmentThreshold = 5; // ms
-        let baseDeleteDelay = 100;
+        let baseDeleteDelay = 1000;
         let deleteDelay = baseDeleteDelay;
-        let baseSearchDelay = 100;
+        let baseSearchDelay = 1000;
         let searchDelay = baseSearchDelay;
         let delCount = 0;
         let failCount = 0;
@@ -163,25 +182,14 @@
         let throttledCount = 0;
         let throttledTotalTime = 0;
         let offset = 0;
-        let iterations = -1;
        
         const wait = async ms => new Promise(done => setTimeout(done, ms));
         const msToHMS = s => `${s / 3.6e6 | 0}h ${(s % 3.6e6) / 6e4 | 0}m ${(s % 6e4) / 1000 | 0}s`;
         const escapeHTML = html => html.replace(/[&<"']/g, m => ({ '&': '&amp;', '<': '&lt;', '"': '&quot;', '\'': '&#039;' })[m]);
         const redact = str => `<span class="priv">${escapeHTML(str)}</span><span class="mask">REDACTED</span>`;
         const queryString = params => params.filter(p => p[1] !== undefined).map(p => p[0] + '=' + encodeURIComponent(p[1])).join('&');
-        const ask = async msg => new Promise(resolve => setTimeout(() => resolve(popup.confirm(msg)), 10));
         const printDelayStats = () => log.verb(`Delete delay: ${deleteDelay}ms, Search delay: ${searchDelay}ms`, `Last Ping: ${lastPing}ms, Average Ping: ${avgPing|0}ms`);
         const toSnowflake = (date) => /:/.test(date) ? ((new Date(date).getTime() - 1420070400000) * Math.pow(2, 22)) : date;
-            
-        const log = {
-            debug() { extLogger ? extLogger('debug', arguments) : console.debug.apply(console, arguments); },
-            info() { extLogger ? extLogger('info', arguments) : console.info.apply(console, arguments); },
-            verb() { extLogger ? extLogger('verb', arguments) : console.log.apply(console, arguments); },
-            warn() { extLogger ? extLogger('warn', arguments) : console.warn.apply(console, arguments); },
-            error() { extLogger ? extLogger('error', arguments) : console.error.apply(console, arguments); },
-            success() { extLogger ? extLogger('success', arguments) : console.info.apply(console, arguments); },
-        };
 
         async function recurse() {
             let API_SEARCH_URL;
@@ -275,14 +283,6 @@
             
             
             if (messagesToDelete.length > 0) {
-
-                if (++iterations < 1) {
-                    log.verb(`Waiting for your confirmation...`);
-                    if (!await ask(`Do you want to delete ~${total} messages?\nEstimated time: ${etr}\n\n---- Preview ----\n` +
-                        messagesToDelete.map(m => `${m.author.username}#${m.author.discriminator}: ${m.attachments.length ? '[ATTACHMENTS]' : m.content}`).join('\n')))
-                            return end(log.error('Aborted by you!'));
-                    log.verb(`OK`);
-                }
                 
                 for (let i = 0; i < messagesToDelete.length; i++) {
                     const message = messagesToDelete[i];
